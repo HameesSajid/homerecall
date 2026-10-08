@@ -1,0 +1,12 @@
+[
+  {"question": "is anyone playing video games", "clips": ["20261006_193005.mp4"]},
+  {"question": "are people sitting on a sofa", "clips": ["20261006_193005.mp4"]},
+  {"question": "is there a dog running", "clips": ["20261007_101500.mp4"]},
+  {"question": "are people sitting on a bench outside", "clips": ["20261007_101500.mp4"]},
+  {"question": "did anyone take eggs out of the fridge", "clips": []},
+  {"question": "is someone cooking on the stove", "clips": []},
+  {"question": "did a cat jump on the table", "clips": []},
+  {"question": "is anyone riding a bicycle", "clips": []},
+  {"question": "did someone carry a package to the door", "clips": []},
+  {"question": "is a person sleeping in a bed", "clips": []}
+]

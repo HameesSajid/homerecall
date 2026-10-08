@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.cache/
+# Private: your footage, and everything derived from it
+recordings/
+index/
+results/
+*.pt
+*.ts
+*.onnx
+*.engine
+runs/
+outputs/*.mp4
+outputs/*.jpg
+.ipynb_checkpoints/

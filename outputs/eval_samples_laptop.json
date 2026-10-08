@@ -1,0 +1,117 @@
+{
+  "profile": "laptop",
+  "threshold": 0.5,
+  "summary": {
+    "questions": 10,
+    "expect_yes": 4,
+    "expect_no": 6,
+    "verdict_accuracy": 0.9,
+    "found_when_present": 0.75,
+    "correct_no_when_absent": 1.0,
+    "retrieval_recall@1": 1.0,
+    "retrieval_recall@5": 1.0,
+    "retrieval_recall@10": 1.0
+  },
+  "questions": [
+    {
+      "question": "is anyone playing video games",
+      "expected": "yes",
+      "answered": "yes",
+      "verdict_correct": true,
+      "retrieval_rank": 1,
+      "moments": 5,
+      "best_confidence": 0.571,
+      "false_matches": 0
+    },
+    {
+      "question": "are people sitting on a sofa",
+      "expected": "yes",
+      "answered": "yes",
+      "verdict_correct": false,
+      "retrieval_rank": 1,
+      "moments": 5,
+      "best_confidence": 0.68,
+      "false_matches": 1
+    },
+    {
+      "question": "is there a dog running",
+      "expected": "yes",
+      "answered": "yes",
+      "verdict_correct": true,
+      "retrieval_rank": 1,
+      "moments": 5,
+      "best_confidence": 0.871,
+      "false_matches": 0
+    },
+    {
+      "question": "are people sitting on a bench outside",
+      "expected": "yes",
+      "answered": "yes",
+      "verdict_correct": true,
+      "retrieval_rank": 1,
+      "moments": 5,
+      "best_confidence": 0.951,
+      "false_matches": 0
+    },
+    {
+      "question": "did anyone take eggs out of the fridge",
+      "expected": "no",
+      "answered": "no",
+      "verdict_correct": true,
+      "retrieval_rank": null,
+      "moments": 5,
+      "best_confidence": 0.198,
+      "false_matches": 0
+    },
+    {
+      "question": "is someone cooking on the stove",
+      "expected": "no",
+      "answered": "no",
+      "verdict_correct": true,
+      "retrieval_rank": null,
+      "moments": 5,
+      "best_confidence": 0.024,
+      "false_matches": 0
+    },
+    {
+      "question": "did a cat jump on the table",
+      "expected": "no",
+      "answered": "no",
+      "verdict_correct": true,
+      "retrieval_rank": null,
+      "moments": 5,
+      "best_confidence": 0.047,
+      "false_matches": 0
+    },
+    {
+      "question": "is anyone riding a bicycle",
+      "expected": "no",
+      "answered": "no",
+      "verdict_correct": true,
+      "retrieval_rank": null,
+      "moments": 5,
+      "best_confidence": 0.313,
+      "false_matches": 0
+    },
+    {
+      "question": "did someone carry a package to the door",
+      "expected": "no",
+      "answered": "no",
+      "verdict_correct": true,
+      "retrieval_rank": null,
+      "moments": 5,
+      "best_confidence": 0.194,
+      "false_matches": 0
+    },
+    {
+      "question": "is a person sleeping in a bed",
+      "expected": "no",
+      "answered": "no",
+      "verdict_correct": true,
+      "retrieval_rank": null,
+      "moments": 5,
+      "best_confidence": 0.062,
+      "false_matches": 0
+    }
+  ]
+}
