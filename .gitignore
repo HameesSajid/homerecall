@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 venv/
 .cache/
+# Private: the camera's address and password
+cameras.json
 # Private: your footage, and everything derived from it
 recordings/
 index/

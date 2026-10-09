@@ -21,11 +21,23 @@ OneDrive, so none of it syncs.
 | `recordings\` | 104 MB | Copies of LiveScene's two sample clips, renamed `20261006_193005.mp4` and `20261007_101500.mp4` to look like camera exports, for testing. Safe to delete | No |
 | `index\` | 1.4 MB | The search index built from those two clips: `index.db` and 25 key frame images. Safe to delete; `recall.py index` rebuilds it | No |
 | `results\` | 12 MB | Answers from test questions: cut clips, frame strips, `result.json`. Safe to delete | No |
+| `cameras.example.json` | under 1 KB | Shows the format of `cameras.json`, with placeholder values | Yes |
 | `.git\` (hidden) | under 1 MB | Git history | It is the link to GitHub |
 
 The "No" rows are excluded by `.gitignore`. `recordings\`, `index\` and `results\` will
 hold images from inside your home once real footage is indexed, which is why they must
 stay out of git.
+
+### Files that appear when you start using the camera
+
+Neither exists yet; both are created by commands you run.
+
+| Path inside the project folder | Created by | Contents | On GitHub? |
+|--------------------------------|------------|----------|------------|
+| `cameras.json` | `recall.py camera add <name>` | The camera's network address, including the camera account's username and **password in plain text**. Delete the file, or run `recall.py camera remove <name>`, to forget it | No |
+| `recordings\<camera name>\` | `recall.py watch <name>` | One MPEG-4 clip per visit, named by start time. About 50 MB per minute of recorded activity at 2560x1440 (measured on busy test footage; a still room should be less). **Nothing deletes old clips automatically**, so this folder grows. Recording pauses when the disk has under 10 GB free | No |
+| `recordings\<camera name>\.incoming\` | `recall.py watch <name>` | The clip being written right now; it moves up one folder when finished. A file left here after a crash is an unfinished clip and can be deleted | No |
+| `results\camera_<name>.jpg` | `recall.py camera check <name>` | One snapshot from the camera | No |
 
 ## 2. What HomeRecall uses but did not add
 
@@ -62,7 +74,7 @@ are 8 GB and 18 GB of models).
 | Qwen2.5-VL-3B / 7B language models | 7.5 GB / 17 GB | Colab only |
 | YOLOE-26l / 26x detectors | 76 MB / 164 MB | Colab only |
 | `sentencepiece`, `protobuf` (listed in `requirements.txt` for SigLIP 2) | a few MB | Colab only; not needed by the laptop profile |
-| ffmpeg | about 100 MB | Not needed. Clips are cut with OpenCV, which is why cut clips have no sound |
+| ffmpeg | about 100 MB | Not needed. Clips are recorded and cut with OpenCV, which is why they have no sound and are larger than the camera's own files |
 
 ## 5. Removing things
 
@@ -88,9 +100,10 @@ Remove-Item -Recurse -Force C:\Users\hamee\vscode\homerecall\index
 
 ## 6. Git and GitHub
 
-The repository was initialised locally with your name and email set for this repository
-only. It uses the Git for Windows you installed at `C:\Program Files\Git\`. See the
-change log for whether it has been pushed.
+The repository is https://github.com/HameesSajid/homerecall (private, branch `main`).
+Your name and email are set for this repository only. It uses the Git for Windows you
+installed at `C:\Program Files\Git\` and the GitHub sign-in already saved in Windows
+Credential Manager; no new credential was stored.
 
 ## Change log
 
@@ -98,4 +111,6 @@ change log for whether it has been pushed.
 |------|--------|
 | 2026-10-08 | Project created at `C:\Users\hamee\vscode\homerecall\`. No packages installed, no models downloaded |
 | 2026-10-08 | Copied LiveScene's two sample clips into `recordings\` under camera-style names for testing; built `index\`; test questions wrote `results\` |
-| 2026-10-08 | Git repository initialised locally; not yet pushed to GitHub |
+| 2026-10-08 | Git repository initialised locally |
+| 2026-10-08 | Private GitHub repository `HameesSajid/homerecall` created through the GitHub website and the project pushed to it |
+| 2026-10-08 | Added recording from a camera stream (`watch`, `camera`). No packages installed, no models downloaded: the stream is read and clips are written with the OpenCV already in LiveScene's environment. Test clips made while building it were written to a temporary folder and deleted |

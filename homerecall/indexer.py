@@ -29,9 +29,11 @@ VIDEO_EXT = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".ts"}
 
 
 def find_clips(folder):
-    """Every video under `folder`, sorted by path."""
+    """Every video under `folder`, sorted by path. Folders whose name starts with a dot
+    are skipped: the recorder keeps clips it is still writing in one."""
     out = []
-    for root, _, names in os.walk(folder):
+    for root, dirs, names in os.walk(folder):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
         out += [os.path.join(root, n) for n in names if os.path.splitext(n)[1].lower() in VIDEO_EXT]
     return sorted(out)
 

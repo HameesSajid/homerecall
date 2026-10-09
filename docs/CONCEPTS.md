@@ -164,9 +164,54 @@ stores paths relative to itself, it can be built on Colab and queried on the lap
 the expensive, accuracy-critical work (captioning every moment) is done once by the
 large model.
 
-## 11. What is deliberately not done
+## 11. Recording from the camera's stream
+
+Exporting clips from a camera app one at a time does not scale, and an SD card may be
+encrypted. Most network cameras, Tapo included, also offer their live video over RTSP, a
+standard streaming protocol on the local network. HomeRecall reads that stream and makes
+its own person-triggered clips.
+
+**Person-triggered, with a pre-roll.** The detector looks at two frames a second. A clip
+starts after two sightings in a row (one sighting alone is treated as noise) and ends
+when nobody has been seen for 5 seconds. The last 3 seconds of video are always held in
+memory, so the clip begins before the person appeared: the moment someone walks in is
+exactly what a later question may be about, and the trigger itself is a second late.
+
+**Alternative: record continuously.** Simpler, and nothing can be missed by the trigger,
+but a day of 2K video is tens of gigabytes and almost all of it is an empty room that
+then has to be scanned at indexing time.
+
+**Writing by the clock.** A network stream does not deliver frames evenly: Wi-Fi delays
+some and drops others, and a busy PC skips some. If frames were simply written one after
+another, a clip that lost a second of frames would be a second short, and every time
+after that point would be wrong. Instead each frame is stamped with the clock time it
+arrived, and the writer repeats or skips frames so that the number written always equals
+elapsed time multiplied by the frame rate. A position inside the clip is then the true
+time, which is the whole point of a tool whose answer is "at 07:42:16".
+
+**A reader that never waits.** The stream is read on its own thread into a short queue.
+If the rest of the program falls behind, the oldest waiting frame is dropped. Without
+this, a slow moment would let the stream back up, and the recorder would fall further
+and further behind real time.
+
+**Clips appear whole.** A clip is written in a hidden `.incoming` folder and moved into
+place when it is finished, so the indexer never sees half a file.
+
+**Indexing in the background.** Each finished clip is handed to a second thread with its
+own copies of the models and its own database connection. Recording does not wait for
+captioning, and a question can be asked from another window while both are running.
+
+**Alternative: copy the camera's compressed video straight to disk** instead of decoding
+and re-encoding it. That gives smaller files, no quality loss and sound, and is what a
+network video recorder does. It needs ffmpeg as a separate program; OpenCV can only
+write frames it has decoded. It is on the roadmap as an option, not a requirement.
+
+**The camera's password** lives in one file, `cameras.json`, typed in by the owner and
+excluded from git. The address is masked wherever it is displayed.
+
+## 12. What is deliberately not done
 
 - **Face recognition / identifying people.** Out of scope, and a privacy problem.
-- **Direct camera access.** Kept out until the folder workflow is proven; it also means
-  no camera password is ever needed.
+- **The camera maker's cloud or account.** Only the local stream is used, with a login
+  that exists for that purpose alone.
 - **Cloud APIs.** Footage of the inside of a home stays on machines you control.

@@ -1,6 +1,9 @@
 """HomeRecall command line.
 
-    python recall.py index <folder of recordings>     build or update the index
+    python recall.py camera add kitchen                set up a camera (asks for its address)
+    python recall.py camera check kitchen              test the connection, save a snapshot
+    python recall.py watch kitchen                     record when a person appears, and index
+    python recall.py index <folder of recordings>      index recordings exported from an app
     python recall.py ask "did anyone take eggs out of the fridge yesterday"
     python recall.py ask                               keep asking, models stay loaded
     python recall.py log --date 2026-10-06             what the camera saw that day
@@ -15,6 +18,11 @@ import sys
 
 from homerecall import paths  # sets HF_HOME; keep above the model libraries
 from homerecall.config import PROFILES, pick
+from homerecall.models import Models
+
+
+def say(*parts):
+    print(*parts, flush=True)
 
 
 def build_parser():
@@ -26,6 +34,21 @@ def build_parser():
     ap.add_argument("--allow-download", action="store_true",
                     help="let the laptop profile download a model that is not on disk")
     sub = ap.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("camera", help="set up, list or test cameras")
+    p.add_argument("action", choices=["add", "list", "check", "remove"])
+    p.add_argument("name", nargs="?")
+
+    p = sub.add_parser("watch", help="record from a camera whenever a person appears, and index the clips")
+    p.add_argument("camera", nargs="?", help="camera name from 'camera add' (optional when there is only one)")
+    p.add_argument("--source", help="instead of a named camera: a stream address, a webcam number, or a video file")
+    p.add_argument("--recordings", help="where clips are saved (default: ./recordings/<camera>)")
+    p.add_argument("--no-index", action="store_true", help="only record; index later with 'index'")
+    p.add_argument("--no-captions", action="store_true", help="index without the language model")
+    p.add_argument("--pre", type=float, default=3.0, help="seconds kept from before the person appeared")
+    p.add_argument("--post", type=float, default=5.0, help="seconds recorded after the person was last seen")
+    p.add_argument("--max-clip", type=float, default=120.0, help="longest clip, in seconds, before a new one starts")
+    p.add_argument("--min-free-gb", type=float, default=10.0, help="stop recording when the disk has less free space")
 
     p = sub.add_parser("index", help="index new or changed recordings in a folder")
     p.add_argument("folder")
@@ -53,48 +76,122 @@ def build_parser():
     return ap
 
 
-class Models:
-    """Loads each model the first time it is asked for."""
+# ---------------------------------------------------------------- cameras
 
-    def __init__(self, cfg):
-        self.cfg = cfg
-        self._cache = {}
+def cmd_camera(args):
+    from homerecall import cameras
 
-    def _get(self, key, make):
-        if key not in self._cache:
-            print(f"Loading {key}...", flush=True)
-            self._cache[key] = make()
-        return self._cache[key]
+    known = cameras.load()
+    if args.action == "list":
+        if not known:
+            say("No cameras yet. Add one with: python recall.py camera add kitchen")
+        for name, url in known.items():
+            say(f"{name:12} {cameras.mask(url)}")
+        return
+    if args.action == "add":
+        import getpass
 
-    def detector(self):
-        from homerecall.detector import OpenVocabDetector
+        name = args.name or input("A short name for this camera (for example kitchen): ").strip()
+        if not name:
+            sys.exit("A name is needed.")
+        say("Enter the camera's address on your network and the Camera Account you created in its app.")
+        host = input("Camera IP address (for example 192.168.1.50): ").strip()
+        user = input("Camera account username: ").strip()
+        password = getpass.getpass("Camera account password (not shown while typing): ")
+        if not (host and user and password):
+            sys.exit("All three are needed; nothing was saved.")
+        known[name] = cameras.rtsp_url(host, user, password)
+        cameras.save(known)
+        say(f"Saved {name} as {cameras.mask(known[name])} in {cameras.CONFIG}")
+        say(f"Test it with: python recall.py camera check {name}")
+        return
+    if args.action == "remove":
+        if args.name not in known:
+            sys.exit(f"No camera called {args.name!r}.")
+        del known[args.name]
+        cameras.save(known)
+        say(f"Removed {args.name}.")
+        return
+    # check
+    import cv2
 
-        return self._get(f"detector {self.cfg.detector}",
-                         lambda: OpenVocabDetector(self.cfg.detector, imgsz=self.cfg.imgsz))
+    from homerecall.recorder import FrameSource
 
-    def vlm(self):
-        from homerecall.vlm import load_vlm
+    try:
+        name, url = cameras.resolve(args.name)
+    except LookupError as e:
+        sys.exit(str(e))
+    say(f"Connecting to {name} at {cameras.mask(url)} ...")
+    src = FrameSource(url, log=say)
+    src.start()
+    try:
+        if not src.connected.wait(25):
+            sys.exit("No connection after 25 seconds. Check the IP address, the username and password, that the "
+                     "camera and this PC are on the same network, and that the Camera Account is switched on.")
+        _, frame = src.frames.get(timeout=15)
+    except KeyboardInterrupt:
+        sys.exit(1)
+    finally:
+        src.stop()
+    os.makedirs(paths.RESULTS, exist_ok=True)
+    shot = os.path.join(paths.RESULTS, f"camera_{name}.jpg")
+    cv2.imwrite(shot, frame)
+    say(f"Connected: {frame.shape[1]}x{frame.shape[0]} at {src.fps:.0f} frames per second.")
+    say(f"Snapshot saved to {shot}")
 
-        return self._get(f"language model {self.cfg.vlm}", lambda: load_vlm(self.cfg.vlm, max_side=self.cfg.vlm_side))
 
-    def embedder(self):
-        from homerecall.embed import Embedder
+def cmd_watch(args, cfg):
+    from homerecall import cameras
+    from homerecall.recorder import IndexWorker, watch
 
-        return self._get(f"embedder {self.cfg.embedder}", lambda: Embedder(self.cfg.embedder))
+    if args.source:
+        source = int(args.source) if args.source.isdigit() else args.source
+        name = args.camera or "camera"
+    else:
+        try:
+            name, source = cameras.resolve(args.camera)
+        except LookupError as e:
+            sys.exit(str(e))
+    if isinstance(source, str) and os.path.isfile(source):
+        source = os.path.abspath(source)
+    folder = os.path.abspath(args.recordings or os.path.join(paths.REPO, "recordings", name))
+    index_dir = os.path.abspath(args.index_dir)
+    detector = Models(cfg, log=say).detector()  # loaded before any thread starts
+    worker = None
+    if not args.no_index:
+        worker = IndexWorker(index_dir, cfg, captions=not args.no_captions, log=say)
+        worker.start()
+    say(f"Clips go to {folder}")
+    is_file = isinstance(source, str) and os.path.isfile(source)
+    saved = watch(source, folder, detector, on_clip=worker.add if worker else None, pre_s=args.pre, post_s=args.post,
+                  max_s=args.max_clip, min_free_gb=args.min_free_gb, log=say)
+    left = 0
+    if worker:
+        try:
+            if not is_file:
+                say("Finishing the clip being indexed (Ctrl+C again to skip)...")
+            left = worker.finish(drain=is_file)
+        except KeyboardInterrupt:
+            left = worker.jobs.qsize()
+    say(f"Saved {saved} clip{'s' if saved != 1 else ''} this session.")
+    if left or (args.no_index and saved):
+        say(f"Some clips are not indexed yet. Index them with: python recall.py index \"{folder}\"")
 
+
+# ---------------------------------------------------------------- index, ask, log
 
 def cmd_index(args, cfg, store):
     from homerecall.indexer import index_folder
 
     if not os.path.isdir(args.folder):
         sys.exit(f"Not a folder: {args.folder}")
-    models = Models(cfg)
+    models = Models(cfg, log=say)
     done, moments = index_folder(
         args.folder, store, cfg, models.detector(),
         vlm=None if args.no_captions else models.vlm(),
         embedder=models.embedder() if cfg.embedder else None,
-        limit=args.limit, reindex=args.reindex)
-    print(f"Indexed {done} recordings, {moments} moments. Index: {store.root}")
+        limit=args.limit, reindex=args.reindex, log=say)
+    say(f"Indexed {done} recordings, {moments} moments. Index: {store.root}")
 
 
 def cmd_ask(args, cfg, store):
@@ -106,28 +203,28 @@ def cmd_ask(args, cfg, store):
     if args.date:
         start = parse_day(args.date)
         end = start + dt.timedelta(days=1)
-    models = Models(cfg)
+    models = Models(cfg, log=say)
     has_embeddings = store.stats()["with_embeddings"] > 0
     searcher = Searcher(store, cfg, detector=None if args.no_probe else models.detector,
                         vlm=None if args.no_verify else models.vlm,
-                        embedder=models.embedder if (cfg.embedder and has_embeddings) else None)
+                        embedder=models.embedder if (cfg.embedder and has_embeddings) else None, log=say)
     if has_embeddings and not cfg.embedder:
-        print("Note: this index has embeddings, but the current profile has no embedder, so they are not used.")
+        say("Note: this index has embeddings, but the current profile has no embedder, so they are not used.")
 
     def answer(question):
         result = searcher.search(question, start, end, verify=args.verify, threshold=args.threshold,
                                  probe=not args.no_probe)
         if result["matches"]:
             report.save(result, store, report.result_folder(paths.RESULTS, question), clips=not args.no_clips)
-        print()
-        print(report.format_result(result, args.top))
+        say()
+        say(report.format_result(result, args.top))
         if args.open and result["matches"]:
             best = result["matches"][0]
             os.startfile(best.get("cut") or best["clip_path"])  # noqa: S606 (Windows only)
 
     if args.question:
         return answer(args.question)
-    print("Ask about your recordings. Empty line to quit.")
+    say("Ask about your recordings. Empty line to quit.")
     while True:
         try:
             question = input("\n> ").strip()
@@ -147,27 +244,31 @@ def cmd_log(args, store):
     for w in store.windows(start, end):
         if w["start"][:10] != day:
             day = w["start"][:10]
-            print(f"\n{dt.date.fromisoformat(day):%A %d %B %Y}")
+            say(f"\n{dt.date.fromisoformat(day):%A %d %B %Y}")
         tags = [k for k, v in json.loads(w["objects"]).get("tags", {}).items() if v >= 0.25 and k != "person"]
-        print(f"  {w['start'][11:]} to {w['end'][11:]}  {w['caption'] or '(no caption)'}"
-              + (f"  [{', '.join(tags[:6])}]" if tags else ""))
+        say(f"  {w['start'][11:]} to {w['end'][11:]}  {w['caption'] or '(no caption)'}"
+            + (f"  [{', '.join(tags[:6])}]" if tags else ""))
 
 
 def main():
     args = build_parser().parse_args()
     from homerecall.store import Store
 
+    if args.command == "camera":
+        return cmd_camera(args)
     if args.command in ("log", "stats"):
         store = Store(args.index_dir)
         if args.command == "stats":
-            print(json.dumps(store.stats(), indent=2))
+            say(json.dumps(store.stats(), indent=2))
         else:
             cmd_log(args, store)
         return
     cfg = pick(args.profile, vlm=args.vlm, detector=args.detector)
     if not cfg.allow_download and not args.allow_download:
         paths.forbid_downloads()
-    print(f"Profile: {cfg.name}  (models from {paths.CACHE})")
+    say(f"Profile: {cfg.name}  (models from {paths.CACHE})")
+    if args.command == "watch":
+        return cmd_watch(args, cfg)
     store = Store(args.index_dir)
     (cmd_index if args.command == "index" else cmd_ask)(args, cfg, store)
 

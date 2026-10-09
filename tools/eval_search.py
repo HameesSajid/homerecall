@@ -71,8 +71,7 @@ def main():
     ap.add_argument("--out", default=None, help="write the full report here as JSON")
     args = ap.parse_args()
 
-    from recall import Models
-
+    from homerecall.models import Models
     from homerecall.search import Searcher
     from homerecall.store import Store
 

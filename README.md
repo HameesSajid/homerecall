@@ -20,9 +20,10 @@ YES: 1 matching moment.
 (The block above shows the output format. The numbers measured so far are under
 [Measured so far](#measured-so-far).)
 
-It is built for cameras that record when they see a person, such as a Tapo camera. It
-works on recordings exported into a folder. It does not connect to the camera, and
-nothing leaves your machine: there is no cloud service and no API key.
+It is built for home cameras such as a Tapo camera, and gets its footage in either of
+two ways: it can watch the camera's stream itself and save a clip whenever a person
+appears, or it can read recordings exported from the camera's app into a folder.
+Nothing leaves your machine: there is no cloud service and no API key.
 
 HomeRecall reuses the perception stack of
 [LiveScene](https://github.com/HameesSajid/livescene) (YOLOE open-vocabulary detection, a
@@ -82,7 +83,7 @@ models' work; only the final check uses the laptop's small model.
 
 ## Measured so far
 
-Honest status: this has **not yet been run on real camera footage**, and the Colab
+Status: this has **not yet been run on real camera footage**, and the Colab
 profiles have not been run at all. What has been measured is a small check that the
 whole pipeline works, on the `laptop` profile (GTX 1660 Ti 6 GB, SmolVLM2-500M), using
 two unrelated stock clips renamed to look like camera exports: 36 seconds of video, 5
@@ -93,7 +94,13 @@ moments.
 | Indexing speed | 39 s for a 25 s 4K clip, 14 s for an 11 s 4K clip (about 1.4 times the clip length) |
 | Questions whose answer is in the footage (4) | 3 answered correctly; all 4 had the right moment ranked first by retrieval |
 | Questions whose answer is not in the footage (6), including the eggs question | 6 correctly answered "no" (highest confidence 0.31) |
-| Unit tests | 25, no GPU needed |
+| Unit tests | 35, no GPU needed |
+
+Recording from a stream has been tested without a camera: with a video file standing in
+for the stream, and with the same file served over the local network as a stream that
+ends and restarts. In both, clips were saved under the right names, the recorder
+reconnected by itself, clips were indexed in the background while recording continued,
+and stopping closed the open clip. **It has not been run against a real Tapo camera.**
 
 The one miss: "are people sitting on a sofa" also matched people sitting on a bench
 outdoors, with a higher confidence than the real sofa. The questions and the full report
@@ -127,15 +134,85 @@ your own recordings; see [Measuring it on your footage](#measuring-it-on-your-fo
   name or the file, and times will be when the file was saved, not when it was recorded.
 - Only English questions.
 
-## Getting recordings out of the camera
+## Getting footage, way 1: record from the camera (recommended)
+
+HomeRecall connects to the camera's video stream over your home network, looks for a
+person twice a second, and saves a clip from 3 seconds before the person appeared until
+5 seconds after they left. Each clip is named by its start time and indexed in the
+background as soon as it is saved, so there is nothing to export and times are exact.
+The camera's own recording to its SD card or cloud carries on unaffected.
+
+**One-time setup in the Tapo app** (steps from
+[Tapo's RTSP guide](https://www.tapo.com/en/faq/34/); menu names can change between app
+versions):
+
+1. Open the camera's live view and tap the settings icon in the top right corner.
+2. Tap Advanced Settings, then Camera Account. Accept the notice and create a username
+   and password, 6 to 32 characters each. This is a separate login for the stream, not
+   your Tapo account. Do not reuse your Tapo password for it.
+3. Still in the camera's settings, find the camera's IP address (under the device
+   information). It looks like `192.168.1.50`.
+4. Set the video quality to the best setting, because on some models the stream's
+   resolution follows it.
+
+**Then on the PC:**
+
+```powershell
+cd C:\Users\hamee\vscode\homerecall
+$py = "..\livescene\.venv\Scripts\python.exe"
+
+& $py recall.py camera add kitchen       # asks for the IP address, username and password
+& $py recall.py camera check kitchen     # connects once and saves a snapshot to results\
+& $py recall.py watch kitchen            # records and indexes until you press Ctrl+C
+```
+
+`camera add` stores the camera's address in `cameras.json` in the project folder. That
+file contains the camera account's password in plain text. It is excluded from git and
+never printed: wherever the address is shown, the login is replaced by `***`.
+
+Leave `watch` running in its own PowerShell window. In a second window you can `ask`
+at any time, including about a clip saved a minute ago.
+
+| `watch` option | Default | Meaning |
+|----------------|---------|---------|
+| `--pre` | 3 | Seconds kept from before the person appeared |
+| `--post` | 5 | Seconds recorded after the person was last seen |
+| `--max-clip` | 120 | Longest clip in seconds; longer activity continues in a new clip |
+| `--min-free-gb` | 10 | Recording pauses while the disk has less free space than this |
+| `--recordings` | `recordings\<camera>` | Where clips are saved |
+| `--no-index` | off | Only record; index later with `index` |
+| `--source` | | Use a stream address, a webcam number (`0`) or a video file instead of a named camera |
+
+Things to know:
+
+- **The PC has to be on and `watch` running.** Nothing is recorded while it is not, and
+  it cannot reach footage from before it started (use way 2 for that).
+- **Disk use.** Clips are re-encoded as MPEG-4. A test at 2560x1440 and 15 frames per
+  second on busy footage came to about 50 MB per minute of recorded activity; a mostly
+  still indoor scene should be smaller. Nothing is deleted automatically.
+- **No sound.** OpenCV records video only.
+- **If it does not connect:** check the IP address (it can change when the router
+  restarts; reserving it in the router's settings stops that), the username and
+  password, that the PC and camera are on the same network, and that the camera is not
+  in privacy mode. Battery-powered Tapo models do not offer this stream. Some newer
+  versions of the Tapo app are reported to have an extra third-party access switch;
+  that has not been confirmed for this project.
+- **To try it without a camera:** `& $py recall.py watch --source 0` uses the laptop's
+  webcam.
+
+## Getting footage, way 2: a folder of exported recordings
 
 HomeRecall reads video files (`.mp4`, `.mov`, `.mkv`, `.avi`, `.m4v`, `.ts`) from a
-folder, including subfolders. For a Tapo camera: open a recording in the Tapo app's
-playback view, download it to your phone, then copy the downloaded files to a folder on
-the PC (cable, cloud drive, or any file transfer). Keep the file names the app gives
-them, since that is usually where the date and time are.
+folder, including subfolders. Two ways to fill that folder from a Tapo camera:
 
-Connecting directly to the camera (RTSP stream, SD card, Tapo cloud) is not implemented.
+- Download recordings in the Tapo app's playback view and copy them to the PC. Keep the
+  file names the app gives them, since that is usually where the date and time are.
+- Take the microSD card out of the camera and copy its contents. This only works when
+  card encryption is off; an encrypted card is unreadable on a computer
+  ([Tapo's note on card encryption](https://www.tapo.com/en/faq/745/)). Reading a Tapo
+  card's files has not been tried with this project yet.
+
+Then `& $py recall.py index D:\tapo`.
 
 ## Run locally (Windows, NVIDIA GPU)
 
@@ -147,7 +224,8 @@ and it finds LiveScene's downloaded models by itself.
 cd C:\Users\hamee\vscode\homerecall
 $py = "..\livescene\.venv\Scripts\python.exe"
 
-& $py recall.py index D:\tapo                 # build or update the index (new files only)
+& $py recall.py watch kitchen                  # way 1: record from the camera and index
+& $py recall.py index D:\tapo                 # way 2: index a folder (new files only)
 & $py recall.py ask "did anyone take eggs out of the fridge yesterday"
 & $py recall.py ask                            # keep asking; models load once
 & $py recall.py log --date 2026-10-07          # everything the camera saw that day
@@ -185,6 +263,7 @@ Models (about 2.3 GB for the laptop profile) then download into `.cache` in this
 
 ```powershell
 & $py tests\test_core.py
+& $py tests\test_recorder.py
 ```
 
 ## Run on Google Colab
@@ -234,22 +313,29 @@ were accepted.
 
 ## Privacy
 
-`recordings/`, `index/` and `results/` are excluded from git, because the index contains
-frames from inside your home. Do not remove those lines from `.gitignore`.
+`recordings/`, `index/` and `results/` are excluded from git, because they contain
+footage and frames from inside your home. `cameras.json` is excluded because it contains
+the camera account's password. Do not remove those lines from `.gitignore`.
 
 ## Roadmap
 
-1. Run on real kitchen recordings, on Colab and locally, and replace the table above
-   with real numbers.
+1. Run against the real camera and on real kitchen recordings, on Colab and locally, and
+   replace the table above with real numbers.
 2. A small local web page: type a question, watch the matching clip.
 3. Hand and held-object crops for fine actions such as taking a small item.
-4. Reading the camera's on-screen clock as a fourth time source.
-5. Direct camera access (RTSP or SD card), once the folder workflow is proven.
+4. Save the camera's own compressed video instead of re-encoding it (smaller files, and
+   sound). This needs ffmpeg installed.
+5. Automatic clean-up of recordings older than a chosen number of days.
+6. Reading the camera's on-screen clock as a fourth time source.
 
 ## Repository layout
 
 ```
-recall.py                 command line: index, ask, log, stats
+recall.py                 command line: camera, watch, index, ask, log, stats
+cameras.example.json      the format of cameras.json (which is private and not in git)
+homerecall/cameras.py     camera addresses; hides the login wherever one is shown
+homerecall/recorder.py    recording from a stream when a person appears; background indexing
+homerecall/models.py      loads each model on first use
 homerecall/config.py      model profiles (laptop, colab-t4, colab)
 homerecall/paths.py       where models, the index and results live; download guard
 homerecall/timestamps.py  when a recording started (file name, MP4 header, file date)
@@ -265,6 +351,7 @@ homerecall/search.py      retrieve, verify, merge
 homerecall/report.py      the printed answer, contact sheet, cut clip
 tools/eval_search.py      accuracy on your own labelled questions
 tests/test_core.py        25 unit tests, no GPU needed
+tests/test_recorder.py    10 unit tests for recording, no camera or GPU needed
 notebooks/                Colab notebook
 docs/                     concepts, code guide, install log
 outputs/                  evaluation labels and reports

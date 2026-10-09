@@ -3,9 +3,20 @@
 A file-by-file, function-by-function explanation of HomeRecall. Read
 [CONCEPTS.md](CONCEPTS.md) first for the ideas; this document is about the code.
 
-## The two paths
+## The three paths
 
-**Indexing** (`recall.py index <folder>`), per recording:
+**Recording** (`recall.py watch <camera>`):
+
+1. `cameras.resolve` looks the camera's address up in `cameras.json`.
+2. `recorder.FrameSource` reads the stream on its own thread and stamps each frame with
+   the time it arrived.
+3. `recorder.watch` asks the detector for people twice a second and passes every frame,
+   with the sighting if there was one, to `recorder.ClipRecorder`.
+4. `ClipRecorder` starts, writes and closes clips, named by their start time.
+5. Each closed clip goes to `recorder.IndexWorker`, which runs the indexing steps below
+   on a background thread.
+
+**Indexing** (`recall.py index <folder>`, or the worker above), per recording:
 
 1. `indexer.find_clips` lists the videos; `Store.is_indexed` skips the ones already done.
 2. `indexer.scan` reads the clip once and asks the detector for people twice a second.
@@ -29,15 +40,75 @@ A file-by-file, function-by-function explanation of HomeRecall. Read
 
 ## `recall.py` — command line
 
-- **`build_parser()`** — the `index`, `ask`, `log` and `stats` commands and their options.
-- **`Models`** — builds the detector, language model and embedder the first time each is
-  asked for and keeps them. `ask` hands its methods to the searcher, so a search that
-  needs no detector lookup never loads the detector.
+- **`build_parser()`** — the `camera`, `watch`, `index`, `ask`, `log` and `stats`
+  commands and their options.
+- **`say(...)`** — `print` that flushes, so lines appear at once in a long-running window.
+- **`cmd_camera`** — `add` asks for the IP address and username with `input()` and the
+  password with `getpass` (not shown, not in the shell history), builds the address and
+  saves it; `list` prints the cameras with the login hidden; `remove` deletes one;
+  `check` connects, reads one frame, and saves it as `results/camera_<name>.jpg`.
+- **`cmd_watch`** — resolves the camera (or `--source`), loads the detector, starts the
+  `IndexWorker` unless `--no-index`, and runs `recorder.watch` until Ctrl+C. On exit it
+  lets the clip being indexed finish and says how to index any that are left.
 - **`cmd_index`**, **`cmd_ask`**, **`cmd_log`** — one function per command. `cmd_ask`
-  with no question loops on `input()`, so models load once for many questions.
-- **`main()`** — `log` and `stats` only read the database and load no model library. For
-  the others it resolves the profile and, for a profile with `allow_download=False`,
-  calls `paths.forbid_downloads()` unless `--allow-download` was given.
+  with no question loops on `input()`, so models load once for many questions. `ask`
+  hands the model loaders to the searcher, so a search that needs no detector lookup
+  never loads the detector.
+- **`main()`** — `camera`, `log` and `stats` load no model. For the others it resolves
+  the profile and, for a profile with `allow_download=False`, calls
+  `paths.forbid_downloads()` unless `--allow-download` was given.
+
+## `homerecall/models.py` — loading models
+
+**`Models(cfg, log)`** builds the detector, language model and embedder the first time
+each is asked for (`detector()`, `vlm()`, `embedder()`) and keeps them.
+
+## `homerecall/cameras.py` — camera addresses
+
+- **`CONFIG`** — `cameras.json` in the project folder: `{name: address}`.
+- **`mask(source)`** — the address with `user:password@` replaced by `***@`. Everything
+  that prints an address goes through this.
+- **`rtsp_url(host, username, password, stream, port)`** — builds the address,
+  percent-escaping the username and password so any characters work.
+- **`load`**, **`save`** — read and write the file.
+- **`resolve(name)`** — the named camera; with no name, the only camera in the file, or
+  the `HOMERECALL_CAMERA_URL` environment variable. Errors say what to run next and
+  never include an address.
+
+## `homerecall/recorder.py` — recording from a stream
+
+- **`FrameSource(source)`** — a thread that reads frames into `frames`, a queue of
+  `(time, image)`.
+  - `_open()` — opens a stream with FFmpeg over TCP with 10-second open and read
+    timeouts; a webcam number or a file is opened normally.
+  - `_put(item)` — for a live source, drops the oldest waiting frame when the queue is
+    full (counted in `dropped`); for a file, waits for room instead.
+  - `run()` — connect, read until the stream fails, reconnect with a growing delay (2 s
+    up to 60 s). A file is read once and given the times it would have had playing live.
+  - `connected`, `ended` — events the caller waits on. `stop()` ends the thread.
+- **`open_writer(path, fps, size)`** — an MPEG-4 `VideoWriter`.
+- **`ClipRecorder(folder, fps, pre_s, post_s, max_s, min_hits, min_free_gb, on_close)`**
+  - `feed(t, frame, person)` — one frame; `person` is `True`/`False` if the detector
+    looked at it, else `None`. While idle it keeps the last `pre_s` seconds as JPEGs and
+    starts a clip after `min_hits` sightings in a row. While recording it writes the
+    frame, closes the clip `post_s` after the last sighting, and rolls into a new clip
+    at `max_s`.
+  - `idle(now)` — closes an open clip when no frame has arrived for `post_s`.
+  - `_disk_ok(t)` — refuses to start a clip when free space is below the limit, saying
+    so at most every ten minutes.
+  - `_begin(frames)` — names the clip after its first frame's time, opens the writer in
+    `.incoming`, writes the pre-roll.
+  - `_write(t, frame)` — writes as many copies of the frame as the clock says are owed
+    (none if it is early), so clip time equals real time.
+  - `close()` — releases the writer, moves the file into place, calls `on_close`.
+- **`IndexWorker(index_dir, cfg, captions)`** — a thread with its own `Store` and
+  `Models`. `add(path)` queues a clip; `run()` indexes them one at a time and reports,
+  rather than raises, a clip that fails; `finish(drain)` stops after the current clip
+  (or after all of them) and returns how many were left.
+- **`watch(source, folder, detector, on_clip, ...)`** — the recording loop: wait for the
+  connection, then for each frame decide whether it is time for a person check, feed the
+  recorder, and report dropped frames every 500. Ctrl+C stops the source and closes the
+  open clip.
 
 ## `homerecall/config.py` — profiles
 
@@ -172,7 +243,8 @@ Pure Python, no model.
 
 ## `homerecall/indexer.py` — the indexing pass
 
-- **`find_clips(folder)`** — every video under a folder.
+- **`find_clips(folder)`** — every video under a folder, skipping folders whose name
+  starts with a dot (the recorder's `.incoming`).
 - **`scan(path, detector, sample_fps)`** — pass 1. Uses `grab()` for skipped frames so
   only examined frames are decoded to images.
 - **`save_keyframes(path, windows, k, side, folder)`** — pass 2. Writes each key frame
@@ -230,6 +302,15 @@ fusion, time phrases (and words like "may" that must not be read as dates), the 
 (verifies, merges overlapping matches, says no, respects the time range, labels
 unverified results).
 
+`tests/test_recorder.py`, 10 tests, no camera or GPU: a clip includes the pre-roll and
+stops after the person leaves; one sighting does not start a clip; clip length follows
+the clock when frames are lost; long activity rolls into a new clip; a break in the
+stream closes the clip; stopping closes an open clip and names never collide; a full
+disk stops recording; a clip written by the real writer reads back through
+`FrameSource` with the right times and is found by `find_clips` while `.incoming` is
+not; addresses are escaped and masked; the camera file and its error messages.
+
 ```
 python tests/test_core.py
+python tests/test_recorder.py
 ```

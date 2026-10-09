@@ -43,7 +43,9 @@ class Store:
     def __init__(self, root):
         self.root = os.path.abspath(root)
         os.makedirs(os.path.join(self.root, "frames"), exist_ok=True)
-        self.db = sqlite3.connect(os.path.join(self.root, "index.db"))
+        # The recorder's indexing thread and an `ask` in another window may use the index
+        # at the same time; wait for the other to finish instead of failing.
+        self.db = sqlite3.connect(os.path.join(self.root, "index.db"), timeout=60)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(_SCHEMA)
