@@ -214,6 +214,43 @@ folder, including subfolders. Two ways to fill that folder from a Tapo camera:
 
 Then `& $py recall.py index D:\tapo`.
 
+## Getting it back on a PC from GitHub
+
+The repository holds the code, documents, notebook and test reports. It does not hold a
+Python environment, models, recordings, the index or results. (The local copy at
+`C:\Users\hamee\vscode\homerecall` was removed on 2026-11-03 to free disk space, together
+with LiveScene's, whose environment and models it used; see
+[docs/INSTALLED.md](docs/INSTALLED.md).)
+
+**Way A: next to LiveScene (no second environment, recommended).**
+
+1. Get LiveScene back first, by following "Getting it back on a PC from GitHub" in
+   [LiveScene's README](https://github.com/HameesSajid/livescene#getting-it-back-on-a-pc-from-github).
+   That rebuilds `livescene\.venv` and downloads the models into `livescene\.cache`,
+   including `yoloe-26m-seg.pt`, which HomeRecall's `laptop` profile needs.
+2. Clone HomeRecall into the same parent folder (the repository is private, so Git uses
+   your saved GitHub sign-in):
+
+   ```powershell
+   cd C:\Users\hamee\vscode
+   git clone https://github.com/HameesSajid/homerecall.git
+   cd homerecall
+   $py = "..\livescene\.venv\Scripts\python.exe"
+   & $py tests\test_core.py
+   ```
+
+   If `git` is not found, use `& "C:\Program Files\Git\cmd\git.exe"`.
+3. Test footage: the old `recordings\` folder held copies of LiveScene's two sample clips
+   renamed `20261006_193005.mp4` (`dog_square.mp4`) and `20261007_101500.mp4`
+   (`gaming_sofa.mp4`). Copy them in under those names and run `& $py recall.py index
+   recordings` to rebuild `index\`.
+4. Cameras: `cameras.json` is never in git. Run `& $py recall.py camera add <name>` again.
+
+**Way B: on its own.** Follow "Setting it up without LiveScene" below; the first
+`--allow-download` run fetches the models (about 2.3 GB) into `homerecall\.cache`.
+
+**Colab** needs nothing on the PC: see [Run on Google Colab](#run-on-google-colab).
+
 ## Run locally (Windows, NVIDIA GPU)
 
 HomeRecall uses the same libraries as LiveScene. If LiveScene is set up in the folder
